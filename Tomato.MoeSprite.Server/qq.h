@@ -16,7 +16,8 @@ namespace qq
 {
 	struct Session
 	{
-		utility::string_t ptwebqq;
+		utility::string_t ptwebqq, vfwebqq, psessionid;
+		int uin;
 	};
 
 	enum class State
@@ -25,12 +26,16 @@ namespace qq
 		NotLogin,
 		// µÈ´ýÉ¨Ãè QR
 		WaitForScanQR,
-		GetPtWebQQ
+		CheckSignature,
+		GetVfWebQQ,
+		DoLogin,
+		Ready
 	};
 
 	struct LoginSession
 	{
-		utility::string_t qrSig, checkSigUri;
+		utility::string_t qrSig, checkSigUri, p_uin, p_skey, pt4_token,
+			pt2gguin, uin, skey;
 	};
 
 	class QQClient
@@ -43,7 +48,9 @@ namespace qq
 	private:
 		concurrency::task<bool> Login();
 		concurrency::task<bool> CheckQRScanState();
-		concurrency::task<bool> GetPtWebQQ();
+		concurrency::task<bool> CheckSignature();
+		concurrency::task<bool> GetVfWebQQ();
+		concurrency::task<bool> DoLogin();
 		void CheckState();
 	private:
 		State _state = State::NotLogin;
