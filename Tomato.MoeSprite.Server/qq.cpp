@@ -53,14 +53,27 @@ namespace
 			return this->next_stage()->propagate(request);
 		}
 	};
+
+	class poll_config : public http_client_config
+	{
+	public:
+		poll_config()
+		{
+			this->set_timeout(std::chrono::seconds(50));
+		}
+	};
 }
 
 QQClient::QQClient()
 	:_loginSession(std::make_shared<LoginSession>()),
-	_client(U("https://ssl.ptlogin2.qq.com/")),
-	_session(std::make_shared<Session>())
+	_session(std::make_shared<Session>()),
+	_swebqq(U("http://s.web2.qq.com")),
+	_d1webqq(U("http://d1.web2.qq.com")),
+	_pollClient(U("http://d1.web2.qq.com"), poll_config())
 {
-	_client.add_handler(static_cast<std::shared_ptr<http_pipeline_stage>>(std::make_shared<set_useragent_stage>()));
+	_swebqq.add_handler(static_cast<std::shared_ptr<http_pipeline_stage>>(std::make_shared<set_useragent_stage>()));
+	_d1webqq.add_handler(static_cast<std::shared_ptr<http_pipeline_stage>>(std::make_shared<set_useragent_stage>()));
+
 }
 
 void QQClient::Start()
@@ -81,7 +94,10 @@ void QQClient::OnProcessLoginQRCode(concurrency::streams::istream & stream)
 
 task<bool> QQClient::Login()
 {
-	return GetLoginQRCode(_client, _loginSession, [this](streams::istream & stream)
+	_client = std::make_shared<http_client>(U("https://ssl.ptlogin2.qq.com/"));
+	_client->add_handler(static_cast<std::shared_ptr<http_pipeline_stage>>(std::make_shared<set_useragent_stage>()));
+
+	return GetLoginQRCode(*_client, _loginSession, [this](streams::istream & stream)
 	{
 		OnProcessLoginQRCode(stream);
 		return task_from_result();
@@ -97,9 +113,9 @@ concurrency::task<bool> QQClient::CheckQRScanState()
 	http_request request(methods::GET);
 	request.set_request_uri(U("https://ssl.ptlogin2.qq.com/ptqrlogin?webqq_type=10&remember_uin=1&login2qq=1&aid=501004106&u1=http%3A%2F%2Fw.qq.com%2Fproxy.html%3Flogin2qq%3D1%26webqq_type%3D10&ptredirect=0&ptlang=2052&daid=164&from_ui=1&pttype=1&dumy=&fp=loginerroralert&action=0-0-157510&mibao_css=m_webqq&t=1&g=1&js_type=0&js_ver=10143&login_sig=&pt_randsalt=0"));
 	auto& headers = request.headers();
-	headers.add(U("Refer"), U("https://ui.ptlogin2.qq.com/cgi-bin/login?daid=164&target=self&style=16&mibao_css=m_webqq&appid=501004106&enable_qlogin=0&no_verifyimg=1&s_url=http%3A%2F%2Fw.qq.com%2Fproxy.html&f_url=loginerroralert&strong_login=1&login_state=10&t=20131024001"));
+	headers.add(U("Referer"), U("https://ui.ptlogin2.qq.com/cgi-bin/login?daid=164&target=self&style=16&mibao_css=m_webqq&appid=501004106&enable_qlogin=0&no_verifyimg=1&s_url=http%3A%2F%2Fw.qq.com%2Fproxy.html&f_url=loginerroralert&strong_login=1&login_state=10&t=20131024001"));
 	headers.add(U("Cookie"), _loginSession->qrSig);
-	return _client.request(request).then([this](http_response& response)
+	return _client->request(request).then([this](http_response& response)
 	{
 		if (response.status_code() != status_codes::OK)
 			throw std::runtime_error("cannot check QR scan state.");
@@ -137,7 +153,7 @@ concurrency::task<bool> QQClient::CheckSignature()
 	http_request request(methods::GET);
 	request.set_request_uri(_loginSession->checkSigUri);
 
-	return _client.request(request).then([this](http_response& response)
+	return _client->request(request).then([this](http_response& response)
 	{
 		if (response.status_code() != status_codes::Found)
 			throw std::runtime_error("cannot check signature.");
@@ -170,21 +186,13 @@ concurrency::task<bool> QQClient::GetVfWebQQ()
 	http_request request(methods::GET);
 	request.set_request_uri(U("http://s.web2.qq.com/api/getvfwebqq?ptwebqq=") + _session->ptwebqq + U("&clientid=53999199&psessionid=&t=0.1"));
 	auto& headers = request.headers();
-	headers.add(U("Refer"), U("http://s.web2.qq.com/proxy.html?v=20130916001&callback=1&id=1"));
-	stringstream_t cookies;
-	cookies << L"ptwebqq=" << _session->ptwebqq << L';' << _loginSession->p_uin
-		<< L';' << _loginSession->p_skey << L';' << _loginSession->pt4_token
-		<< L';' << _loginSession->pt2gguin << L';' << _loginSession->uin << L';' << _loginSession->skey;
-	headers.add(U("Cookie"), cookies.str());
+	headers.add(U("Referer"), U("http://s.web2.qq.com/proxy.html?v=20130916001&callback=1&id=1"));
+	SetCookie(headers);
 
-	return _client.request(request).then([this](http_response& response)
+	return _swebqq.request(request).then([this](http_response& response)
 	{
-		//if (response.status_code() != status_codes::OK)
-		//	throw std::runtime_error("cannot get vfwebqq.");
-		return response.extract_string(true).then([=](string_t str)
-		{
-			return true;
-		});
+		if (response.status_code() != status_codes::OK)
+			throw std::runtime_error("cannot get vfwebqq.");
 		return response.extract_json().then([=](web::json::value& value)
 		{
 			auto& result = value[U("result")].as_object();
@@ -199,14 +207,16 @@ concurrency::task<bool> QQClient::DoLogin()
 {
 	http_request request(methods::POST);
 	request.set_request_uri(U("http://d1.web2.qq.com/channel/login2"));
-	request.headers().add(U("Refer"), U("http://s.web2.qq.com/proxy.html?v=20130916001&callback=1&id=2"));
+	auto& headers = request.headers();
+	headers.add(U("Referer"), U("http://s.web2.qq.com/proxy.html?v=20130916001&callback=1&id=2"));
+	SetCookie(headers);
 	request.set_body(U(R"(r={"ptwebqq":")") + _session->ptwebqq + U(R"(","clientid":53999199,"psessionid":"","status":"online"})"), U("application/x-www-form-urlencoded"));
 
-	return _client.request(request).then([this](http_response& response)
+	return _d1webqq.request(request).then([this](http_response& response)
 	{
 		if (response.status_code() != status_codes::OK)
 			throw std::runtime_error("cannot do login.");
-		return response.extract_json().then([=](web::json::value& value)
+		return response.extract_json(true).then([=](web::json::value& value)
 		{
 			auto& result = value[U("result")].as_object();
 			_session->uin = result[U("uin")].as_integer();
@@ -215,6 +225,60 @@ concurrency::task<bool> QQClient::DoLogin()
 			return false;
 		});
 	});
+}
+
+void QQClient::StartMessagePump()
+{
+
+}
+
+concurrency::task<bool> QQClient::UpdateInfo()
+{
+	return concurrency::task<bool>();
+}
+
+concurrency::task<bool> QQClient::Poll()
+{
+	http_request request(methods::POST);
+	request.set_request_uri(U("http://d1.web2.qq.com/channel/poll2"));
+	auto& headers = request.headers();
+	headers.add(U("Referer"), U("http://d1.web2.qq.com/proxy.html?v=20151105001&callback=1&id=2"));
+	SetCookie(headers);
+	request.set_body(U(R"(r={"ptwebqq":")") + _session->ptwebqq + U(R"(","clientid":53999199,"psessionid":")") +
+		_session->psessionid + U(R"(","key":""})"), U("application/x-www-form-urlencoded"));
+
+	return _d1webqq.request(request).then([this](http_response& response)
+	{
+		if (response.status_code() != status_codes::OK)
+			throw std::runtime_error("cannot poll message.");
+		return response.extract_json(true).then([=](web::json::value& value)
+		{
+			auto retcode = value[U("retcode")].as_integer();
+			if (retcode != 0)
+			{
+				_state = State::NotLogin;
+				return true;
+			}
+			else if (value.has_field(U("result")))
+			{
+				auto& result = value[U("result")].as_array();
+				std::for_each(result.begin(), result.end(), [this](web::json::value& value)
+				{
+					DispatchMessage(value.as_object());
+				});
+			}
+			return false;
+		});
+	});
+}
+
+void QQClient::SetCookie(web::http::http_headers & headers) const
+{
+	stringstream_t cookies;
+	cookies << _loginSession->p_uin
+		<< L';' << _loginSession->p_skey
+		<< L';' << _loginSession->uin << L';' << _loginSession->skey;
+	headers.add(U("Cookie"), cookies.str());
 }
 
 void QQClient::CheckState()
@@ -237,6 +301,10 @@ void QQClient::CheckState()
 	case State::DoLogin:
 		t = DoLogin();
 		break;
+	case State::Ready:
+		StartMessagePump();
+		OnReady();
+		break;
 	default:
 		break;
 	}
@@ -246,5 +314,14 @@ void QQClient::CheckState()
 		{
 			if (next) CheckState();
 		});
+	}
+}
+
+void QQClient::DispatchMessage(web::json::object & message)
+{
+	auto poll_type = message[U("poll_type")].as_string();
+	if (poll_type == U("group_message"))
+	{
+
 	}
 }

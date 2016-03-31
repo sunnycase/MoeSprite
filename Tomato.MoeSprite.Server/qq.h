@@ -10,6 +10,8 @@
 #include <cpprest/streams.h>
 #include <cpprest/http_client.h>
 
+#undef DispatchMessage
+
 DEFINE_NS_SPRITE
 
 namespace qq
@@ -29,7 +31,7 @@ namespace qq
 		CheckSignature,
 		GetVfWebQQ,
 		DoLogin,
-		Ready
+		Ready,
 	};
 
 	struct LoginSession
@@ -38,23 +40,37 @@ namespace qq
 			pt2gguin, uin, skey;
 	};
 
+	struct GroupIncomeMessage
+	{
+
+	};
+
 	class QQClient
 	{
 	public:
 		QQClient();
 
 		void Start();
+	protected:
 		virtual void OnProcessLoginQRCode(concurrency::streams::istream& stream);
+		virtual void OnReady() = 0;
 	private:
 		concurrency::task<bool> Login();
 		concurrency::task<bool> CheckQRScanState();
 		concurrency::task<bool> CheckSignature();
 		concurrency::task<bool> GetVfWebQQ();
 		concurrency::task<bool> DoLogin();
+		void StartMessagePump();
+		concurrency::task<bool> UpdateInfo();
+		concurrency::task<bool> Poll();
+		void SetCookie(web::http::http_headers& headers) const;
 		void CheckState();
+
+		void DispatchMessage(web::json::object& message);
 	private:
 		State _state = State::NotLogin;
-		web::http::client::http_client _client;
+		std::shared_ptr<web::http::client::http_client> _client;
+		web::http::client::http_client _swebqq, _d1webqq, _pollClient;
 		std::shared_ptr<LoginSession> _loginSession;
 		std::shared_ptr<Session> _session;
 	};

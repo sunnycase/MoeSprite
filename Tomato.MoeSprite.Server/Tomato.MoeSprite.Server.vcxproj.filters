@@ -33,6 +33,12 @@
     <ClInclude Include="platform.h">
       <Filter>头文件</Filter>
     </ClInclude>
+    <ClInclude Include="clr.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="NonCopyable.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="stdafx.cpp">
@@ -42,6 +48,9 @@
       <Filter>源文件</Filter>
     </ClCompile>
     <ClCompile Include="qq.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="clr.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
   </ItemGroup>

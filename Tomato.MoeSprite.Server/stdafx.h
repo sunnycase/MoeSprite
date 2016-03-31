@@ -16,3 +16,4 @@
 
 #include <cpprest/http_client.h>
 #include <cpprest/filestream.h>
+#include "../vendors/mscoree.h"
