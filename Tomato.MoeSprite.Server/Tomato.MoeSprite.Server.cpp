@@ -17,6 +17,12 @@ public:
 	}
 };
 
+__interface
+	IApplication : public IUnknown
+{
+	void Run();
+};
+
 int main()
 {
 	//std::locale::global(std::locale(""));
@@ -30,9 +36,10 @@ int main()
 #else
 	ClrHost clr;
 	auto appDomain{ clr.CreateAppDomain(L"Tomato.MoeSprite.Heart.dll") };
-	WRL::ComPtr<IUnknown> objUnk;
-	auto fn = appDomain.CreateDelegate<void _stdcall(IUnknown**)>(L"Tomato.MoeSprite.Heart", L"Tomato.MoeSprite.Heart.Startup", L"CreateApplication");
+	WRL::ComPtr<IApplication> objUnk;
+	auto fn = appDomain.CreateDelegate<void _stdcall(IApplication**)>(L"Tomato.MoeSprite.Heart", L"Tomato.MoeSprite.Heart.Startup", L"CreateApplication");
 	fn(&objUnk);
+	objUnk->Run();
 	//auto fn = appDomain.CreateDelegate<int32_t _stdcall(int32_t)>(L"Tomato.MoeSprite.Heart", L"Tomato.MoeSprite.Heart.Program", L"Add");
 	//std::cout << "Call Add(1):" << fn(1) << std::endl;
 #endif
